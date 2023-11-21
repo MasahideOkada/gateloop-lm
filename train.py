@@ -114,8 +114,8 @@ def flattened_traversal(fn: Callable[[str, Any], bool]) -> Callable[[Params], Pa
     return mask
 
 def get_tx(
-    base_lr: int,
-    state_transition_lr: int,
+    base_lr: float,
+    state_transition_lr: float,
     momentum: Tuple[float, float],
     weight_decay: float,
     warmup_steps: int,
