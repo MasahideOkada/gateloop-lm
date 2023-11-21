@@ -1,0 +1,6 @@
+{
+    "model_dim": 512,
+    "fnn_dim": 1536,
+    "num_layers": 10,
+    "gn_num_groups": 32
+}
