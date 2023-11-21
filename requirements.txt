@@ -1,0 +1,7 @@
+pandas==1.5.3
+numpy==1.23.5
+#jax[cpu]==0.4.20
+jax[cuda11_pip]==0.4.20 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+flax==0.7.5
+torch --index-url https://download.pytorch.org/whl/cu118
+sentencepiece==0.1.99
