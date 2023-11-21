@@ -5,3 +5,4 @@ jax[cuda11_pip]==0.4.20 -f https://storage.googleapis.com/jax-releases/jax_cuda_
 flax==0.7.5
 torch --index-url https://download.pytorch.org/whl/cu118
 sentencepiece==0.1.99
+tqdm==4.66.1
