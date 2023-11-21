@@ -5,7 +5,6 @@ import logging
 from typing import Any, Callable, Optional, Tuple
 
 import numpy as np
-import pandas as pd
 from sentencepiece import SentencePieceProcessor
 from tqdm.auto import tqdm
 
@@ -246,7 +245,7 @@ def main():
     )
 
     model = GateLoopLM(config=gl_config)
-    dummy_inputs = jnp.ones((max_seq_len), dtype=jnp.int32)
+    dummy_inputs = jnp.ones((max_seq_len,), dtype=jnp.int32)
     variables = model.init(random.key(init_seed), dummy_inputs)
     tx = get_tx(
         base_lr,
