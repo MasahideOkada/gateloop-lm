@@ -13,7 +13,7 @@ def max_headed_gate_loop_operator(
     q: Array,
     a: Array,
 ) -> Array:
-    def binary_operator(e_i: Array, e_j: Array) -> Tuple[Array]:
+    def binary_operator(e_i: Array, e_j: Array) -> Tuple[Array, Array]:
         a_i, kv_i = e_i
         a_j, kv_j = e_j
         return a_j * a_i, a_j * kv_i + kv_j
@@ -29,7 +29,7 @@ def general_gate_loop_operator(
     q: Array,
     a: Array,
 ) -> Array:
-    def binary_operator(e_i: Array, e_j: Array) -> Tuple[Array]:
+    def binary_operator(e_i: Array, e_j: Array) -> Tuple[Array, Array]:
         a_i, kv_i = e_i
         a_j, kv_j = e_j
         return a_j * a_i, matmul_2(a_j, kv_i) + kv_j
