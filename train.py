@@ -12,7 +12,6 @@ import jax
 import jax.numpy as jnp
 from jax import Array, random
 from flax import linen as nn
-from flax import traverse_util
 from flax.core import FrozenDict
 from flax.training import orbax_utils
 from flax.training.train_state import TrainState
