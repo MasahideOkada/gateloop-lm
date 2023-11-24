@@ -251,11 +251,11 @@ def main():
         valid_loss = 0.0
 
         # train
-        for batch_step, batch in enumerate(train_dl):
+        for batch in train_dl:
             bsz = batch.shape[0]
             state, loss = train_step(state, batch, ignore_id=pad_id)
             train_loss += loss.item() * bsz
-            step += batch_step
+            step += 1
         train_loss /= len(train_dl.dataset)
 
         # validation

@@ -45,7 +45,7 @@ def get_tx(
         cosine_scheduler(state_transition_lr, warmup_steps, decay_steps),
         b1=momentum[0],
         b2=momentum[1],
-        weight_decay=weight_decay,
+        weight_decay=0.0,
     )
     tx = optax.chain(
         optax.masked(
