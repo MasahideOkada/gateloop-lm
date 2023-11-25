@@ -94,44 +94,26 @@ def parse_args() -> Args:
     args = parser.parse_args()
     return args
 
-def compute_cross_entropy_loss(
-    logits: Array,
-    targets: Array,
-    ignore_id: Optional[int],
-) -> Array:
-    considered = (
-        targets != ignore_id if isinstance(ignore_id, int) else targets == targets
-    ).astype(logits.dtype)
-    considered_sum = jnp.sum(considered, axis=-1)
+def compute_cross_entropy_loss(logits: Array, targets: Array) -> Array:
     targets_onehot = jax.nn.one_hot(targets, logits.shape[-1], dtype=logits.dtype)
-
     loss = -jnp.sum(targets_onehot * nn.log_softmax(logits), axis=-1)
-    loss = jnp.sum(loss * considered, axis=-1) / considered_sum
     return loss.mean()
 
 @jax.jit
-def compute_metrics(
-    state: TrainState,
-    batch: Array,
-    ignore_id: Optional[int],
-) -> Array:
+def compute_metrics(state: TrainState, batch: Array) -> Array:
     inputs = batch[:, :-1]
     targets = batch[:, 1:]
     logits = state.apply_fn({"params": state.params}, inputs)
-    loss = compute_cross_entropy_loss(logits, targets, ignore_id)
+    loss = compute_cross_entropy_loss(logits, targets)
     return loss
 
 @jax.jit
-def train_step(
-    state: TrainState,
-    batch: Array,
-    ignore_id: Optional[int],
-) -> Tuple[TrainState, Array]:
+def train_step(state: TrainState, batch: Array) -> Tuple[TrainState, Array]:
     def loss_fn(params: Params) -> Array:
         inputs = batch[:, :-1]
         targets = batch[:, 1:]
         logits = state.apply_fn({"params": params}, inputs)
-        loss = compute_cross_entropy_loss(logits, targets, ignore_id)
+        loss = compute_cross_entropy_loss(logits, targets)
         return loss
 
     grad_fn = jax.value_and_grad(loss_fn)
@@ -253,7 +235,7 @@ def main():
         # train
         for batch in train_dl:
             bsz = batch.shape[0]
-            state, loss = train_step(state, batch, ignore_id=pad_id)
+            state, loss = train_step(state, batch)
             train_loss += loss.item() * bsz
             step += 1
         train_loss /= len(train_dl.dataset)
@@ -261,7 +243,7 @@ def main():
         # validation
         for batch in valid_dl:
             bsz = batch.shape[0]
-            loss = compute_metrics(state, batch, ignore_id=pad_id)
+            loss = compute_metrics(state, batch)
             valid_loss += loss.item() * bsz
         valid_loss /= len(valid_dl.dataset)
 
