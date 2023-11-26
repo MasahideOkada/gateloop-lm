@@ -96,7 +96,7 @@ def parse_args() -> Args:
 
 def compute_cross_entropy_loss(logits: Array, targets: Array) -> Array:
     targets_onehot = jax.nn.one_hot(targets, logits.shape[-1], dtype=logits.dtype)
-    loss = -jnp.sum(targets_onehot * nn.log_softmax(logits), axis=-1)
+    loss = -jnp.sum(targets_onehot * nn.log_softmax(logits), axis=-1).sum(axis=-1)
     return loss.mean()
 
 @jax.jit
