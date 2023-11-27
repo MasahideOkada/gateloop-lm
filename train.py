@@ -4,6 +4,7 @@ import argparse
 import logging
 from typing import Any, Callable, Optional, Tuple
 
+import pandas as pd
 import numpy as np
 from sentencepiece import SentencePieceProcessor
 from tqdm.auto import tqdm
@@ -94,26 +95,45 @@ def parse_args() -> Args:
     args = parser.parse_args()
     return args
 
-def compute_cross_entropy_loss(logits: Array, targets: Array) -> Array:
+def compute_cross_entropy_loss(
+    logits: Array,
+    targets: Array,
+    weights: Optional[Array],
+) -> Array:
     targets_onehot = jax.nn.one_hot(targets, logits.shape[-1], dtype=logits.dtype)
-    loss = -jnp.sum(targets_onehot * nn.log_softmax(logits), axis=-1).sum(axis=-1)
-    return loss.mean()
+    loss = -jnp.sum(targets_onehot * nn.log_softmax(logits), axis=-1)
+
+    normalizing_factor = np.prod(targets.shape)
+    if weights:
+        loss = loss * weights
+        normalizing_factor = weights.sum()
+    return loss.sum() / normalizing_factor
 
 @jax.jit
-def compute_metrics(state: TrainState, batch: Array) -> Array:
+def compute_metrics(state: TrainState, batch: Array, pad_id: Optional[int]) -> Array:
     inputs = batch[:, :-1]
     targets = batch[:, 1:]
     logits = state.apply_fn({"params": state.params}, inputs)
-    loss = compute_cross_entropy_loss(logits, targets)
+    weights = jnp.where(
+        inputs != pad_id, 1, 0
+    ).astype(logits.dtype) if isinstance(pad_id, int) else None
+    loss = compute_cross_entropy_loss(logits, targets, weights)
     return loss
 
 @jax.jit
-def train_step(state: TrainState, batch: Array) -> Tuple[TrainState, Array]:
+def train_step(
+    state: TrainState,
+    batch: Array,
+    pad_id: Optional[int],
+) -> Tuple[TrainState, Array]:
     def loss_fn(params: Params) -> Array:
         inputs = batch[:, :-1]
         targets = batch[:, 1:]
         logits = state.apply_fn({"params": params}, inputs)
-        loss = compute_cross_entropy_loss(logits, targets)
+        weights = jnp.where(
+            inputs != pad_id, 1, 0
+        ).astype(logits.dtype) if isinstance(pad_id, int) else None
+        loss = compute_cross_entropy_loss(logits, targets, weights)
         return loss
 
     grad_fn = jax.value_and_grad(loss_fn)
@@ -148,25 +168,29 @@ def main():
     weight_decay = train_config["weight_decay"]
     warmup_steps = train_config["warmup_steps"]
     decay_steps = train_config["decay_steps"]
-    train_valid_test_split = train_config["train_valid_test_split"]
-    data_split_seed = train_config["data_split_seed"]
+    do_eval = train_config["do_eval"]
+    if do_eval:
+        train_valid_split = train_config["train_valid_split"]
+        data_split_seed = train_config["data_split_seed"]
     init_seed = train_config["model_init_seed"]
 
     dataset = TextDataset(csv_path=args.csv_path, sp_processor=sp_processor)
-    generator = torch.Generator().manual_seed(data_split_seed)
-    train_ds, valid_ds, test_ds = random_split(
-        dataset, train_valid_test_split, generator=generator
-    )
-    collate_fn = make_collate_fn(max_seq_len, pad_id)
-    train_dl = DataLoader(
-        train_ds, batch_size=batch_size, collate_fn=collate_fn, shuffle=True
-    )
-    valid_dl = DataLoader(
-        valid_ds, batch_size=batch_size, collate_fn=collate_fn, shuffle=False
-    )
-    test_dl = DataLoader(
-        test_ds, batch_size=batch_size, collate_fn=collate_fn, shuffle=False
-    )
+    collate_fn = make_collate_fn(max_seq_len, pad_id, batch_size)
+    if do_eval:
+        generator = torch.Generator().manual_seed(data_split_seed)
+        train_ds, valid_ds = random_split(
+            dataset, train_valid_split, generator=generator
+        )
+        train_dl = DataLoader(
+            train_ds, batch_size=batch_size, collate_fn=collate_fn, shuffle=True
+        )
+        valid_dl = DataLoader(
+            valid_ds, batch_size=batch_size, collate_fn=collate_fn, shuffle=False
+        )
+    else:
+        train_dl = DataLoader(
+            dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=True
+        )
 
     gl_config = GateLoopConfig(
         model_dim=model_dim,
@@ -176,7 +200,7 @@ def main():
     )
 
     model = GateLoopLM(config=gl_config)
-    dummy_inputs = jnp.ones((max_seq_len,), dtype=jnp.int32)
+    dummy_inputs = jnp.ones((1, max_seq_len), dtype=jnp.int32)
     variables = model.init(random.key(init_seed), dummy_inputs)
     tx = get_tx(
         base_lr,
@@ -195,6 +219,8 @@ def main():
         checkpoint_dir, checkpointer
     )
     
+    train_loss_path = os.path.join(checkpoint_dir, "train_loss.csv")
+    valid_loss_path = os.path.join(checkpoint_dir, "valid_loss.csv")
     if args.restore:
         dummy_state = TrainState.create(
             apply_fn=model.apply,
@@ -203,22 +229,26 @@ def main():
         )
         target = {
             "state": dummy_state,
-            "train_loss_hist": np.array([]),
-            "valid_loss_hist": np.array([]),
+            "epoch": np.array(1, dtype=np.int32),
         }
         step = checkpoint_manager.latest_step()
         checkpoint = checkpoint_manager.restore(step, items=target)
         state = checkpoint["state"]
-        train_loss_hist = checkpoint["train_loss_hist"]
-        valid_loss_hist = checkpoint["valid_loss_hist"]
+        last_epoch = checkpoint["epoch"].item()
+        train_loss_hist = pd.read_csv(train_loss_path)
+        train_loss_hist = train_loss_hist["loss"].to_list()
+        if do_eval:
+            valid_loss_hist = pd.read_csv(valid_loss_path)
+            valid_loss_hist = valid_loss_hist["loss"].to_list()
         logger.info(f"continue training from the checkpoint at epoch {len(train_loss_hist)}")
     else:
         step = 0
         state = TrainState.create(
             apply_fn=model.apply, params=variables["params"], tx=tx
         )
-        train_loss_hist = np.array([])
-        valid_loss_hist = np.array([])
+        last_epoch = 0
+        train_loss_hist = []
+        valid_loss_hist = []
     
     num_epochs = args.num_epochs
     save_interval = args.save_interval
@@ -226,7 +256,6 @@ def main():
     logger.info("start training")
     logger.info(f"number of training epochs: {num_epochs}")
 
-    last_epoch = len(train_loss_hist)
     epochs = tqdm(range(num_epochs), position=0)
     for e in epochs:
         train_loss = 0.0
@@ -235,33 +264,40 @@ def main():
         # train
         for batch in train_dl:
             bsz = batch.shape[0]
-            state, loss = train_step(state, batch)
+            state, loss = train_step(state, batch, pad_id=pad_id)
+            train_loss_hist.append(loss.item())
             train_loss += loss.item() * bsz
             step += 1
         train_loss /= len(train_dl.dataset)
 
         # validation
-        for batch in valid_dl:
-            bsz = batch.shape[0]
-            loss = compute_metrics(state, batch)
-            valid_loss += loss.item() * bsz
-        valid_loss /= len(valid_dl.dataset)
+        if do_eval:
+            for batch in valid_dl:
+                bsz = batch.shape[0]
+                loss = compute_metrics(state, batch, pad_id=pad_id)
+                valid_loss_hist.append(loss.item())
+                valid_loss += loss.item() * bsz
+            valid_loss /= len(valid_dl.dataset)
 
-        step += 1
         epoch = e + last_epoch + 1
-        epochs.write(f"Epoch {epoch}| train loss: {train_loss:.4f}, valid loss: {valid_loss:.4f}")
+        if do_eval:
+            epochs.write(f"Epoch {epoch}| train loss: {train_loss:.4f}, valid loss: {valid_loss:.4f}")
+        else:
+            epochs.write(f"Epoch {epoch}| train loss: {train_loss:.4f}")
 
         # save checkpoint
-        train_loss_hist = jnp.hstack([train_loss_hist, jnp.array([train_loss])])
-        valid_loss_hist = jnp.hstack([valid_loss_hist, jnp.array([valid_loss])])
         if epoch % save_interval == 0 or e == num_epochs - 1:
             checkpoint = {
                 "state": state,
-                "train_loss_hist": train_loss_hist,
-                "valid_loss_hist": valid_loss_hist,
+                "epoch": jnp.array(epoch, dtype=jnp.int32),
             }
             save_args = orbax_utils.save_args_from_target(checkpoint)
             checkpoint_manager.save(step, checkpoint, save_kwargs={"save_args": save_args})
+            df = pd.DataFrame(data={"loss": train_loss_hist})
+            df.to_csv(train_loss_path, index=False)
+            if do_eval:
+                df = pd.DataFrame(data={"loss": valid_loss_hist})
+                df.to_csv(valid_loss_path, index=False)
 
 if __name__ == "__main__":
     main()
