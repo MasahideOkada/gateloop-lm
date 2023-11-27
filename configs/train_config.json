@@ -1,13 +1,14 @@
 {
     "batch_size": 64,
-    "max_seq_len": 128,
+    "max_seq_len": 64,
     "base_lr": 0.000125,
     "state_transition_lr": 0.0001,
     "momentum": [0.9, 0.98],
     "weight_decay": 0.25,
     "warmup_steps": 5000,
-    "decay_steps": 100000,
-    "train_valid_test_split": [0.7, 0.2, 0.1],
+    "decay_steps": 932400,
+    "do_eval": true,
+    "train_valid_split": [0.8, 0.2],
     "data_split_seed": 123,
     "model_init_seed": 123
 }
