@@ -28,7 +28,11 @@ class TextDataset(Dataset):
         text = self.data[index]
         return self.encode(text)
 
-def make_collate_fn(max_seq_len: int, pad_id: int) -> Callable[[List[List[int]]], Array]:
+def make_collate_fn(
+    max_seq_len: int,
+    pad_id: int,
+    batch_size: int,
+) -> Callable[[List[List[int]]], Array]:
     def collate_fn(token_batch: List[List[int]]) -> Array:
         padded_batch = []
         for tokens in token_batch:
@@ -42,6 +46,11 @@ def make_collate_fn(max_seq_len: int, pad_id: int) -> Callable[[List[List[int]]]
             )
             padded_batch.append(padded_tokens[:max_seq_len + 1])
 
-        return np.vstack(padded_batch).astype(np.int32)
+        batch = np.vstack(padded_batch).astype(np.int32)
+        num_batch_pads = batch_size - batch.shape[0]
+        if num_batch_pads > 0:
+            batch_pads = np.full((num_batch_pads, *batch.shape[1:]), pad_id, dtype=np.int32)
+            batch = np.vstack((batch, batch_pads))
+        return batch
 
     return collate_fn
