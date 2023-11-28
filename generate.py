@@ -105,12 +105,13 @@ def topk_sample(
     state: TrainState,
     inputs: Array,
     k: int,
+    *,
+    key: Array = random.PRNGKey(0),
     temperature: float = 1.0,
-    seed: int = 0,
 ) -> Array:
     logits = get_logits(state, inputs)[0, -1]
     topk_logits, topk_tokens = jax.lax.top_k(logits, k=k)
-    topk_idx = random.categorical(random.key(seed), topk_logits / temperature)
+    topk_idx = random.categorical(key, topk_logits / temperature)
     next_token = topk_tokens[topk_idx]
     return next_token
 
@@ -123,16 +124,17 @@ def generate(
     top_k: int = 100,
     temperature: float = 1.0,
     seed: int = 0,
-    seed_generator: Optional[Callable[[], int]] = None,
 ) -> str:
     eos_id = sp_processor.eos_id()
     tokens = sp_processor.encode(prompt, add_bos=True)
+    key = random.PRNGKey(seed)
 
     while len(tokens) < output_len + 1:
         inputs = jnp.array(tokens, dtype=jnp.int32)
-        if seed_generator:
-            seed = seed_generator()
-        next_token = topk_sample(state, inputs, top_k, temperature, seed).item()
+        key, sample_key = random.split(key)
+        next_token = topk_sample(
+            state, inputs, top_k, key=sample_key, temperature=temperature
+        ).item()
 
         if next_token == eos_id:
             break
