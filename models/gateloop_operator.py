@@ -21,7 +21,7 @@ def max_headed_gate_loop_operator(
     kv = (k * v).astype(a.dtype)
     _, y = associative_scan(binary_operator, (a, kv), axis=1)
     y = q.astype(y.dtype) * y
-    return y.real
+    return y
 
 def general_gate_loop_operator(
     k: Array,
@@ -37,4 +37,4 @@ def general_gate_loop_operator(
     kv = outer_product(k, v).astype(a.dtype)
     _, y = associative_scan(binary_operator, (a, kv), axis=1)
     y = matmul_1(q.astype(y.dtype), y)
-    return y.real
+    return y

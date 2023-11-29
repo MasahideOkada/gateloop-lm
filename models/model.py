@@ -64,7 +64,7 @@ class GateLoopBlock(nn.Module):
         g = nn.Dense(
             model_dim,
             use_bias=False,
-            dtype=dtype,
+            dtype=jnp.complex64,
             kernel_init=nn.with_logical_partitioning(
                 nn.initializers.xavier_normal(), ("embed", "g_dim")
             ),
@@ -81,7 +81,7 @@ class GateLoopBlock(nn.Module):
         y = max_headed_gate_loop_operator(k, v, q, a_complex)
         y = nn.GroupNorm(
             num_groups=config.gn_num_groups,
-            dtype=dtype,
+            dtype=jnp.complex64,
             bias_init=nn.with_logical_partitioning(
                 nn.initializers.zeros, ("embed",)
             ),
@@ -93,11 +93,12 @@ class GateLoopBlock(nn.Module):
         y = nn.Dense(
             model_dim,
             use_bias=False,
-            dtype=dtype,
+            dtype=jnp.complex64,
             kernel_init=nn.with_logical_partitioning(
                 nn.initializers.xavier_normal(), ("embed", "o_dim")
             ),
         )(y)
+        y = y.real
 
         # skip connection and layer norm
         x = x + y
