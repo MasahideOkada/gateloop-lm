@@ -113,7 +113,7 @@ def compute_cross_entropy_loss(
 def compute_metrics(state: TrainState, batch: Array, pad_id: Optional[int]) -> Array:
     inputs = batch[:, :-1]
     targets = batch[:, 1:]
-    logits = state.apply_fn({"params": state.params}, inputs)
+    logits = state.apply_fn({"params": state.params}, inputs, training=False)
     weights = jnp.where(
         inputs != pad_id, 1, 0
     ).astype(logits.dtype) if isinstance(pad_id, int) else None
@@ -125,11 +125,18 @@ def train_step(
     state: TrainState,
     batch: Array,
     pad_id: Optional[int],
+    dropout_key: Array,
 ) -> Tuple[TrainState, Array]:
+    dropout_train_key = random.fold_in(key=dropout_key, data=state.step)
     def loss_fn(params: Params) -> Array:
         inputs = batch[:, :-1]
         targets = batch[:, 1:]
-        logits = state.apply_fn({"params": params}, inputs)
+        logits = state.apply_fn(
+            {"params": params},
+            inputs,
+            training=True,
+            rngs={"dropout": dropout_train_key},
+        )
         weights = jnp.where(
             inputs != pad_id, 1, 0
         ).astype(logits.dtype) if isinstance(pad_id, int) else None
@@ -159,6 +166,8 @@ def main():
     model_dim = model_config["model_dim"]
     fnn_dim = model_config["fnn_dim"]
     num_layers = model_config["num_layers"]
+    gn_num_groups = model_config["gn_num_groups"]
+    dropout_rate = model_config["dropout_rate"]
 
     batch_size = train_config["batch_size"]
     max_seq_len = train_config["max_seq_len"]
@@ -172,7 +181,8 @@ def main():
     if do_eval:
         train_valid_split = train_config["train_valid_split"]
         data_split_seed = train_config["data_split_seed"]
-    init_seed = train_config["model_init_seed"]
+    init_seed = train_config["init_seed"]
+    params_key, dropout_key = random.split(random.key(init_seed))
 
     dataset = TextDataset(csv_path=args.csv_path, sp_processor=sp_processor)
     collate_fn = make_collate_fn(max_seq_len, pad_id, batch_size)
@@ -197,11 +207,13 @@ def main():
         fnn_dim=fnn_dim,
         num_layers=num_layers,
         vocab_size=vocab_size,
+        gn_num_groups=gn_num_groups,
+        dropout_rate=dropout_rate,
     )
 
     model = GateLoopLM(config=gl_config)
     dummy_inputs = jnp.ones((1, max_seq_len), dtype=jnp.int32)
-    variables = model.init(random.key(init_seed), dummy_inputs)
+    variables = model.init(params_key, dummy_inputs, training=False)
     tx = get_tx(
         base_lr,
         state_transition_lr,
@@ -264,7 +276,7 @@ def main():
         # train
         for batch in train_dl:
             bsz = batch.shape[0]
-            state, loss = train_step(state, batch, pad_id=pad_id)
+            state, loss = train_step(state, batch, pad_id=pad_id, dropout_key=dropout_key)
             train_loss_hist.append(loss.item())
             train_loss += loss.item() * bsz
             step += 1

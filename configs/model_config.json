@@ -1,6 +1,7 @@
 {
-    "model_dim": 512,
-    "fnn_dim": 1024,
-    "num_layers": 8,
-    "gn_num_groups": 32
+    "model_dim": 128,
+    "fnn_dim": 256,
+    "num_layers": 4,
+    "gn_num_groups": 8,
+    "dropout_rate": 0.1
 }

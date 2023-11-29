@@ -99,7 +99,7 @@ def parse_args() -> Args:
 @jax.jit
 def get_logits(state: TrainState, inputs: Array) -> Array:
     inputs = jnp.expand_dims(inputs, axis=0)
-    return state.apply_fn({"params": state.params}, inputs)
+    return state.apply_fn({"params": state.params}, inputs, training=False)
 
 def topk_sample(
     state: TrainState,

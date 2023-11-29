@@ -17,6 +17,7 @@ class GateLoopConfig:
     fnn_act: Callable[[Array], Array] = nn.activation.gelu
     dtype: Any = jnp.float32
     gn_num_groups: int = 32
+    dropout_rate: float = 0.1
 
 class GateLoopBlock(nn.Module):
     config: GateLoopConfig
@@ -153,7 +154,7 @@ class GateLoopLM(nn.Module):
     config: GateLoopConfig
 
     @nn.compact
-    def __call__(self, x: Array) -> Array:
+    def __call__(self, x: Array, training: bool) -> Array:
         config = self.config
 
         x = nn.Embed(
@@ -164,6 +165,7 @@ class GateLoopLM(nn.Module):
             ),
             name="embedding",
         )(x)
+        x = nn.Dropout(rate=config.dropout_rate, deterministic=not training)(x)
 
         for i in range(config.num_layers):
             x = GateLoopBlock(config=config, name=f"gate_loop_block{i}")(x)

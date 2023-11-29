@@ -10,5 +10,5 @@
     "do_eval": true,
     "train_valid_split": [0.8, 0.2],
     "data_split_seed": 123,
-    "model_init_seed": 123
+    "init_seed": 123
 }
