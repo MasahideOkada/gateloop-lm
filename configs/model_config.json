@@ -1,7 +1,8 @@
 {
-    "model_dim": 128,
-    "fnn_dim": 256,
-    "num_layers": 4,
+    "model_dim": 384,
+    "fnn_dim": 768,
+    "num_layers": 10,
     "gn_num_groups": 8,
-    "dropout_rate": 0.1
+    "embed_dropout_rate": 0.1,
+    "block_dropout_rate": 0.1
 }

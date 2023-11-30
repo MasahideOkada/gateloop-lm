@@ -167,7 +167,8 @@ def main():
     fnn_dim = model_config["fnn_dim"]
     num_layers = model_config["num_layers"]
     gn_num_groups = model_config["gn_num_groups"]
-    dropout_rate = model_config["dropout_rate"]
+    embed_dropout_rate = model_config["embed_dropout_rate"]
+    block_dropout_rate = model_config["block_dropout_rate"]
 
     batch_size = train_config["batch_size"]
     max_seq_len = train_config["max_seq_len"]
@@ -208,7 +209,8 @@ def main():
         num_layers=num_layers,
         vocab_size=vocab_size,
         gn_num_groups=gn_num_groups,
-        dropout_rate=dropout_rate,
+        embed_dropout_rate=embed_dropout_rate,
+        block_dropout_rate=block_dropout_rate,
     )
 
     model = GateLoopLM(config=gl_config)

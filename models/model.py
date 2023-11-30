@@ -17,15 +17,17 @@ class GateLoopConfig:
     fnn_act: Callable[[Array], Array] = nn.activation.gelu
     dtype: Any = jnp.float32
     gn_num_groups: int = 32
-    dropout_rate: float = 0.1
+    embed_dropout_rate: float = 0.1
+    block_dropout_rate: float = 0.1
 
 class GateLoopBlock(nn.Module):
     config: GateLoopConfig
 
     @nn.compact
-    def __call__(self, x: Array) -> Array:
+    def __call__(self, x: Array, training: bool) -> Array:
         config = self.config
         model_dim = config.model_dim
+        dropout_rate = config.block_dropout_rate
         dtype = config.dtype
 
         # linear projections
@@ -100,6 +102,7 @@ class GateLoopBlock(nn.Module):
             ),
         )(y)
         y = y.real
+        y = nn.Dropout(rate=dropout_rate, deterministic=not training)(y)
 
         # skip connection and layer norm
         x = x + y
@@ -135,6 +138,7 @@ class GateLoopBlock(nn.Module):
                 nn.initializers.normal(stddev=1e-6), ("mlp",)
             ),
         )(out)
+        out = nn.Dropout(rate=dropout_rate, deterministic=not training)(out)
 
         # skip connection and layer norm
         out = x + out
@@ -165,10 +169,12 @@ class GateLoopLM(nn.Module):
             ),
             name="embedding",
         )(x)
-        x = nn.Dropout(rate=config.dropout_rate, deterministic=not training)(x)
+        x = nn.Dropout(rate=config.embed_dropout_rate, deterministic=not training)(x)
 
         for i in range(config.num_layers):
-            x = GateLoopBlock(config=config, name=f"gate_loop_block{i}")(x)
+            x = GateLoopBlock(
+                config=config, name=f"gate_loop_block{i}"
+            )(x, training=training)
 
         logits = nn.Dense(
             config.vocab_size,
