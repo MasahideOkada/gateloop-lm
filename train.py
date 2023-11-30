@@ -166,9 +166,10 @@ def main():
     model_dim = model_config["model_dim"]
     fnn_dim = model_config["fnn_dim"]
     num_layers = model_config["num_layers"]
-    gn_num_groups = model_config["gn_num_groups"]
     embed_dropout_rate = model_config["embed_dropout_rate"]
     block_dropout_rate = model_config["block_dropout_rate"]
+    do_group_norm = model_config["do_group_norm"]
+    gn_num_groups = model_config["gn_num_groups"]
 
     batch_size = train_config["batch_size"]
     max_seq_len = train_config["max_seq_len"]
@@ -208,9 +209,10 @@ def main():
         fnn_dim=fnn_dim,
         num_layers=num_layers,
         vocab_size=vocab_size,
-        gn_num_groups=gn_num_groups,
         embed_dropout_rate=embed_dropout_rate,
         block_dropout_rate=block_dropout_rate,
+        do_group_norm=do_group_norm,
+        gn_num_groups=gn_num_groups,
     )
 
     model = GateLoopLM(config=gl_config)
@@ -254,7 +256,7 @@ def main():
         if do_eval:
             valid_loss_hist = pd.read_csv(valid_loss_path)
             valid_loss_hist = valid_loss_hist["loss"].to_list()
-        logger.info(f"continue training from the checkpoint at epoch {len(train_loss_hist)}")
+        logger.info(f"continue training from the checkpoint at epoch {last_epoch}")
     else:
         step = 0
         state = TrainState.create(

@@ -16,9 +16,10 @@ class GateLoopConfig:
     fnn_dim: int
     fnn_act: Callable[[Array], Array] = nn.activation.gelu
     dtype: Any = jnp.float32
-    gn_num_groups: int = 32
     embed_dropout_rate: float = 0.1
     block_dropout_rate: float = 0.1
+    do_group_norm: bool = False
+    gn_num_groups: int = 32
 
 class GateLoopBlock(nn.Module):
     config: GateLoopConfig
@@ -82,16 +83,17 @@ class GateLoopBlock(nn.Module):
 
         # time mixing, gate loop associative scan
         y = max_headed_gate_loop_operator(k, v, q, a_complex)
-        y = nn.GroupNorm(
-            num_groups=config.gn_num_groups,
-            dtype=jnp.complex64,
-            bias_init=nn.with_logical_partitioning(
-                nn.initializers.zeros, ("embed",)
-            ),
-            scale_init=nn.with_logical_partitioning(
-                nn.initializers.ones, ("embed",)
-            ),
-        )(y)
+        if config.do_group_norm:
+            y = nn.GroupNorm(
+                num_groups=config.gn_num_groups,
+                dtype=jnp.complex64,
+                bias_init=nn.with_logical_partitioning(
+                    nn.initializers.zeros, ("embed",)
+                ),
+                scale_init=nn.with_logical_partitioning(
+                    nn.initializers.ones, ("embed",)
+                ),
+            )(y)
         y = y * nn.activation.silu(g)
         y = nn.Dense(
             model_dim,
