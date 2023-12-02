@@ -21,6 +21,24 @@ class GateLoopConfig:
     do_group_norm: bool = False
     gn_num_groups: int = 32
 
+class AddAndLayerNorm(nn.Module):
+    dtype: Any
+
+    @nn.compact
+    def __call__(self, y: Array, x: Array) -> Array:
+        y = y + x
+        y = nn.LayerNorm(
+            dtype=self.dtype,
+            bias_init=nn.with_logical_partitioning(
+                nn.initializers.zeros, ("embed",)
+            ),
+            scale_init=nn.with_logical_partitioning(
+                nn.initializers.ones, ("embed",)
+            ),
+        )(y)
+
+        return y
+
 class GateLoopBlock(nn.Module):
     config: GateLoopConfig
 
@@ -107,16 +125,7 @@ class GateLoopBlock(nn.Module):
         y = nn.Dropout(rate=dropout_rate, deterministic=not training)(y)
 
         # skip connection and layer norm
-        x = x + y
-        x = nn.LayerNorm(
-            dtype=dtype,
-            bias_init=nn.with_logical_partitioning(
-                nn.initializers.zeros, ("embed",)
-            ),
-            scale_init=nn.with_logical_partitioning(
-                nn.initializers.ones, ("embed",)
-            ),
-        )(x)
+        y = AddAndLayerNorm(dtype=dtype)(y, x)
 
         # channel mixing, element-wise fnn
         out = nn.Dense(
@@ -143,17 +152,8 @@ class GateLoopBlock(nn.Module):
         out = nn.Dropout(rate=dropout_rate, deterministic=not training)(out)
 
         # skip connection and layer norm
-        out = x + out
-        out = nn.LayerNorm(
-            dtype=dtype,
-            bias_init=nn.with_logical_partitioning(
-                nn.initializers.zeros, ("embed",)
-            ),
-            scale_init=nn.with_logical_partitioning(
-                nn.initializers.ones, ("embed",)
-            ),
-        )(out)
-
+        out = AddAndLayerNorm(dtype=dtype)(out, y)
+        
         return out
 
 class GateLoopLM(nn.Module):
