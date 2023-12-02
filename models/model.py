@@ -1,6 +1,5 @@
-from typing import Any, Callable, Tuple
+from typing import Any, Callable
 
-from jax.lax import associative_scan
 import jax.numpy as jnp
 from jax import Array
 from flax import linen as nn
@@ -82,28 +81,12 @@ class GateLoopBlock(nn.Module):
         dtype = config.dtype
 
         # linear projections
-        q = nn.Dense(
-            model_dim,
+        qkvg = nn.Dense(
+            model_dim * 4,
             use_bias=False,
             dtype=dtype,
             kernel_init=nn.with_logical_partitioning(
-                nn.initializers.xavier_normal(), ("embed", "q_dim")
-            ),
-        )(x)
-        k = nn.Dense(
-            model_dim,
-            use_bias=False,
-            dtype=dtype,
-            kernel_init=nn.with_logical_partitioning(
-                nn.initializers.xavier_normal(), ("embed", "k_dim")
-            ),
-        )(x)
-        v = nn.Dense(
-            model_dim,
-            use_bias=False,
-            dtype=dtype,
-            kernel_init=nn.with_logical_partitioning(
-                nn.initializers.xavier_normal(), ("embed", "v_dim")
+                nn.initializers.xavier_normal(), ("embed", "projection_dim")
             ),
         )(x)
         a = nn.Dense(
@@ -115,17 +98,15 @@ class GateLoopBlock(nn.Module):
             ),
             name="state_transition",
         )(x)
-        g = nn.Dense(
-            model_dim,
-            use_bias=False,
-            dtype=jnp.complex64,
-            kernel_init=nn.with_logical_partitioning(
-                nn.initializers.xavier_normal(), ("embed", "g_dim")
-            ),
-        )(x)
+        
+        q, k, v, g = qkvg.reshape(
+            (*x.shape[:2], model_dim, 4)
+        ).transpose((3, 0, 1, 2))
+        a_real, a_imag = a.reshape(
+            (*x.shape[:2], model_dim, 2)
+        ).transpose((3, 0, 1, 2))
 
-        # state transition
-        a_real, a_imag = jnp.split(a, 2, axis=-1)
+        # state transition in polar form
         a_complex = a_real + 1j * a_imag
         magnitude = jnp.absolute(a_complex)
         phase = jnp.angle(a_complex)
