@@ -39,6 +39,38 @@ class AddAndLayerNorm(nn.Module):
 
         return y
 
+class FNN(nn.Module):
+    model_dim: int
+    fnn_dim: int
+    activation: Callable[[Array], Array]
+    dtype: Any
+
+    @nn.compact
+    def __call__(self, x: Array) -> Array:
+        x = nn.Dense(
+            self.fnn_dim,
+            dtype=self.dtype,
+            kernel_init=nn.with_logical_partitioning(
+                nn.initializers.xavier_normal(), ("embed", "mlp")
+            ),
+            bias_init=nn.with_logical_partitioning(
+                nn.initializers.normal(stddev=1e-6), ("mlp",)
+            ),
+        )(x)
+        x = self.activation(x)
+        x = nn.Dense(
+            self.model_dim,
+            dtype=self.dtype,
+            kernel_init=nn.with_logical_partitioning(
+                nn.initializers.xavier_normal(), ("embed", "mlp")
+            ),
+            bias_init=nn.with_logical_partitioning(
+                nn.initializers.normal(stddev=1e-6), ("mlp",)
+            ),
+        )(x)
+
+        return x
+
 class GateLoopBlock(nn.Module):
     config: GateLoopConfig
 
@@ -128,32 +160,17 @@ class GateLoopBlock(nn.Module):
         y = AddAndLayerNorm(dtype=dtype)(y, x)
 
         # channel mixing, element-wise fnn
-        out = nn.Dense(
-            config.fnn_dim,
+        out = FNN(
+            model_dim=model_dim,
+            fnn_dim=config.fnn_dim,
+            activation=config.fnn_act,
             dtype=dtype,
-            kernel_init=nn.with_logical_partitioning(
-                nn.initializers.xavier_normal(), ("embed", "mlp")
-            ),
-            bias_init=nn.with_logical_partitioning(
-                nn.initializers.normal(stddev=1e-6), ("mlp",)
-            ),
-        )(x)
-        out = config.fnn_act(out)
-        out = nn.Dense(
-            model_dim,
-            dtype=dtype,
-            kernel_init=nn.with_logical_partitioning(
-                nn.initializers.xavier_normal(), ("embed", "mlp")
-            ),
-            bias_init=nn.with_logical_partitioning(
-                nn.initializers.normal(stddev=1e-6), ("mlp",)
-            ),
-        )(out)
+        )(y)
         out = nn.Dropout(rate=dropout_rate, deterministic=not training)(out)
 
         # skip connection and layer norm
         out = AddAndLayerNorm(dtype=dtype)(out, y)
-        
+
         return out
 
 class GateLoopLM(nn.Module):
