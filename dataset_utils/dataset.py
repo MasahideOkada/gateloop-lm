@@ -1,6 +1,6 @@
 import os
 from functools import partial
-from typing import Callable, List, Union
+from typing import Callable, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -9,16 +9,32 @@ from sentencepiece import SentencePieceProcessor
 from jax import Array
 from torch.utils.data import Dataset
 
+def get_ext(path: Union[str, os.PathLike]) -> str:
+    _, ext = os.path.splitext(path)
+    return ext
+
 class TextDataset(Dataset):
     def __init__(
         self,
-        csv_path: Union[str, os.PathLike],
+        data_path: Union[str, os.PathLike],
         sp_processor: SentencePieceProcessor,
-        col_name: str = "text",
+        col_name: Optional[str] = None,
     ):
-        df = pd.read_csv(csv_path, header=None, names=[col_name], dtype=str)
-        df.dropna(inplace=True)
-        self.data = df[col_name].to_list()
+        match get_ext(data_path):
+            case ".csv":
+                if not isinstance(col_name, str):
+                    raise ValueError(f"`col_name` must be specified for `{data_path}`")
+                df = pd.read_csv(data_path, header=None, names=[col_name], dtype=str)
+                df.dropna(inplace=True)
+                self.data = df[col_name].to_list()
+            case ".txt":
+                self.data = []
+                with open(data_path, "r", encoding="utf-8") as f:
+                    for text in f:
+                        self.data.append(text)
+            case _:
+                raise ValueError("only csv or txt files are supported")
+
         self.encode = partial(sp_processor.encode, add_bos=True, add_eos=True)
 
     def __len__(self) -> int:

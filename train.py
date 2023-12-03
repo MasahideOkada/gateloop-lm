@@ -40,11 +40,19 @@ def parse_args() -> Args:
         help="directory containing model_config.json and train_config.json",
     )
     parser.add_argument(
-        "--csv-path",
+        "--data-path",
         type=str,
         required=True,
-        dest="csv_path",
-        help="csv file path of training data",
+        dest="data_path",
+        help="path to data file, only csv or txt files are supported",
+    )
+    parser.add_argument(
+        "--col-name",
+        type=str,
+        default=None,
+        required=False,
+        dest="col_name",
+        help="when the data is a csv file, specify the column name to use",
     )
     parser.add_argument(
         "--sp-model",
@@ -179,7 +187,9 @@ def main():
     do_eval = train_config["do_eval"]
     init_seed = train_config["init_seed"]
 
-    dataset = TextDataset(csv_path=args.csv_path, sp_processor=sp_processor)
+    dataset = TextDataset(
+        data_path=args.data_path, sp_processor=sp_processor, col_name=args.col_name
+    )
     collate_fn = make_collate_fn(max_seq_len, pad_id, batch_size)
     if do_eval:
         train_valid_split = train_config["train_valid_split"]
