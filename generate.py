@@ -3,7 +3,6 @@ import json
 import argparse
 import datetime
 import logging
-from typing import Callable, Optional
 
 import pandas as pd
 import numpy as np
@@ -26,11 +25,11 @@ Args = argparse.Namespace
 def parse_args() -> Args:
     parser = argparse.ArgumentParser(description="generate texts")
     parser.add_argument(
-        "--model-config",
+        "--config-dir",
         type=str,
         required=True,
-        dest="model_config",
-        help="json file for model configuration",
+        dest="config_dir",
+        help="directory containing model_config.json and train_config.json",
     )
     parser.add_argument(
         "--sp-model",
@@ -98,7 +97,6 @@ def parse_args() -> Args:
 
 @jax.jit
 def get_logits(state: TrainState, inputs: Array) -> Array:
-    inputs = jnp.expand_dims(inputs, axis=0)
     return state.apply_fn({"params": state.params}, inputs, training=False)
 
 def topk_sample(
@@ -106,7 +104,7 @@ def topk_sample(
     inputs: Array,
     k: int,
     *,
-    key: Array = random.PRNGKey(0),
+    key: Array = random.key(0),
     temperature: float = 1.0,
 ) -> Array:
     logits = get_logits(state, inputs)[0, -1]
@@ -120,6 +118,7 @@ def generate(
     prompt: str,
     output_len: int,
     sp_processor: SentencePieceProcessor,
+    max_seq_len: int,
     *,
     top_k: int = 100,
     temperature: float = 1.0,
@@ -127,10 +126,12 @@ def generate(
 ) -> str:
     eos_id = sp_processor.eos_id()
     tokens = sp_processor.encode(prompt, add_bos=True)
-    key = random.PRNGKey(seed)
+    key = random.key(seed)
 
     while len(tokens) < output_len + 1:
-        inputs = jnp.array(tokens, dtype=jnp.int32)
+        inputs = jnp.array(tokens, dtype=jnp.int32)[jnp.newaxis, :]
+        if inputs.shape[1] > max_seq_len:
+            inputs = inputs[:, -max_seq_len:]
         key, sample_key = random.split(key)
         next_token = topk_sample(
             state, inputs, top_k, key=sample_key, temperature=temperature
@@ -139,7 +140,7 @@ def generate(
         if next_token == eos_id:
             break
         tokens.append(next_token)
-    
+
     output = sp_processor.decode(tokens)
     return output
 
@@ -149,8 +150,12 @@ def main():
     logging.basicConfig(encoding="utf-8", level=logging.INFO)
     logger.setLevel(logging.INFO if jax.process_index() == 0 else logging.ERROR)
 
-    with open(args.model_config, "r") as f:
+    model_config_path = os.path.join(args.config_dir, "model_config.json")
+    train_config_path = os.path.join(args.config_dir, "train_config.json")
+    with open(model_config_path, "r") as f:
         model_config = json.load(f)
+    with open(train_config_path, "r") as f:
+        train_config = json.load(f)
     
     sp_processor = SentencePieceProcessor(model_file=args.sp_model)
     vocab_size = sp_processor.vocab_size()
@@ -158,18 +163,29 @@ def main():
     model_dim = model_config["model_dim"]
     fnn_dim = model_config["fnn_dim"]
     num_layers = model_config["num_layers"]
+    embed_dropout_rate = model_config["embed_dropout_rate"]
+    block_dropout_rate = model_config["block_dropout_rate"]
+    do_group_norm = model_config["do_group_norm"]
+    gn_num_groups = model_config["gn_num_groups"]
+    state_transition_lr = train_config["state_transition_lr"]
+    max_seq_len = train_config["max_seq_len"]
 
     gl_config = GateLoopConfig(
         model_dim=model_dim,
         fnn_dim=fnn_dim,
         num_layers=num_layers,
         vocab_size=vocab_size,
+        embed_dropout_rate=embed_dropout_rate,
+        block_dropout_rate=block_dropout_rate,
+        do_group_norm=do_group_norm,
+        gn_num_groups=gn_num_groups,
+        separate_state_transition=True if state_transition_lr else False,
     )
 
     model = GateLoopLM(config=gl_config)
-    dummy_inputs = jnp.ones((1,), dtype=jnp.int32)
-    variables = model.init(random.key(0), dummy_inputs)
-    dummy_tx = get_tx(1e-3, 1e-3, (1.0, 1.0), 1.0, 100, 100)
+    dummy_inputs = jnp.ones((1, max_seq_len), dtype=jnp.int32)
+    variables = model.init(random.key(0), dummy_inputs, training=False)
+    dummy_tx = get_tx(1e-3, None, "constant", None, None, None, None)
 
     checkpointer = orbax.checkpoint.PyTreeCheckpointer()
     checkpoint_manager = orbax.checkpoint.CheckpointManager(
@@ -183,8 +199,7 @@ def main():
     )
     target = {
         "state": dummy_state,
-        "train_loss_hist": np.array([]),
-        "valid_loss_hist": np.array([]),
+        "epoch": np.array(1, dtype=np.int32),
     }
     step = checkpoint_manager.latest_step()
     checkpoint = checkpoint_manager.restore(step, items=target)
@@ -204,6 +219,7 @@ def main():
             args.prompt,
             args.output_len,
             sp_processor,
+            max_seq_len,
             top_k=args.top_k,
             temperature=args.temperature,
             seed=seed,
