@@ -30,8 +30,8 @@ class TextDataset(Dataset):
             case ".txt":
                 self.data = []
                 with open(data_path, "r", encoding="utf-8") as f:
-                    for text in f:
-                        self.data.append(text)
+                    for line in f:
+                        self.data.append(line.rstrip("\n"))
             case _:
                 raise ValueError("only csv or txt files are supported")
 
