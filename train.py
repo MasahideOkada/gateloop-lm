@@ -2,7 +2,7 @@ import os
 import json
 import argparse
 import logging
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import pandas as pd
 import numpy as np
@@ -29,24 +29,15 @@ logger = logging.getLogger(__name__)
 
 Args = argparse.Namespace
 Params = FrozenDict[str, Any]
-Schedule = Callable[[int], float]
-Tx = optax.GradientTransformationExtraArgs
 
 def parse_args() -> Args:
     parser = argparse.ArgumentParser(description="train gateloop language model")
     parser.add_argument(
-        "--model-config",
+        "--config-dir",
         type=str,
         required=True,
-        dest="model_config",
-        help="json file for model configuration",
-    )
-    parser.add_argument(
-        "--train-config",
-        type=str,
-        required=True,
-        dest="train_config",
-        help="json file for training configuration",
+        dest="config_dir",
+        help="directory containing model_config.json and train_config.json",
     )
     parser.add_argument(
         "--csv-path",
@@ -154,15 +145,18 @@ def main():
     logging.basicConfig(encoding="utf-8", level=logging.INFO)
     logger.setLevel(logging.INFO if jax.process_index() == 0 else logging.ERROR)
     
-    with open(args.model_config, "r") as f:
+    model_config_path = os.path.join(args.config_dir, "model_config.json")
+    train_config_path = os.path.join(args.config_dir, "train_config.json")
+    with open(model_config_path, "r") as f:
         model_config = json.load(f)
-    with open(args.train_config, "r") as f:
+    with open(train_config_path, "r") as f:
         train_config = json.load(f)
     
     sp_processor = SentencePieceProcessor(model_file=args.sp_model)
     pad_id = sp_processor.pad_id()
     vocab_size = sp_processor.vocab_size()
-
+    
+    # model hyperparameters
     model_dim = model_config["model_dim"]
     fnn_dim = model_config["fnn_dim"]
     num_layers = model_config["num_layers"]
@@ -170,25 +164,26 @@ def main():
     block_dropout_rate = model_config["block_dropout_rate"]
     do_group_norm = model_config["do_group_norm"]
     gn_num_groups = model_config["gn_num_groups"]
-
+    # training hyperparameters
     batch_size = train_config["batch_size"]
     max_seq_len = train_config["max_seq_len"]
-    base_lr = train_config["base_lr"]
+    lr = train_config["lr"]
     state_transition_lr = train_config["state_transition_lr"]
-    momentum = tuple(train_config["momentum"])
+    if state_transition_lr:
+        logger.info(f"use a separate learning rate for state transition parameters")
+    schedule_type = train_config["schedule_type"]
+    momentum = train_config["momentum"]
     weight_decay = train_config["weight_decay"]
     warmup_steps = train_config["warmup_steps"]
     decay_steps = train_config["decay_steps"]
     do_eval = train_config["do_eval"]
-    if do_eval:
-        train_valid_split = train_config["train_valid_split"]
-        data_split_seed = train_config["data_split_seed"]
     init_seed = train_config["init_seed"]
-    params_key, dropout_key = random.split(random.key(init_seed))
 
     dataset = TextDataset(csv_path=args.csv_path, sp_processor=sp_processor)
     collate_fn = make_collate_fn(max_seq_len, pad_id, batch_size)
     if do_eval:
+        train_valid_split = train_config["train_valid_split"]
+        data_split_seed = train_config["data_split_seed"]
         generator = torch.Generator().manual_seed(data_split_seed)
         train_ds, valid_ds = random_split(
             dataset, train_valid_split, generator=generator
@@ -213,18 +208,21 @@ def main():
         block_dropout_rate=block_dropout_rate,
         do_group_norm=do_group_norm,
         gn_num_groups=gn_num_groups,
+        separate_state_transition=True if state_transition_lr else False,
     )
 
+    params_key, dropout_key = random.split(random.key(init_seed))
     model = GateLoopLM(config=gl_config)
     dummy_inputs = jnp.ones((1, max_seq_len), dtype=jnp.int32)
     variables = model.init(params_key, dummy_inputs, training=False)
     tx = get_tx(
-        base_lr,
-        state_transition_lr,
-        momentum,
-        weight_decay,
-        warmup_steps,
-        decay_steps,
+        lr=lr,
+        state_transition_lr=state_transition_lr,
+        schedule_type=schedule_type,
+        momentum=tuple(momentum) if momentum else None,
+        weight_decay=weight_decay,
+        warmup_steps=warmup_steps,
+        decay_steps=decay_steps,
     )
 
     checkpoint_dir = args.checkpoint_dir
