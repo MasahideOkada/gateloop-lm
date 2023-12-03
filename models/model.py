@@ -19,6 +19,7 @@ class GateLoopConfig:
     block_dropout_rate: float = 0.1
     do_group_norm: bool = False
     gn_num_groups: int = 32
+    separate_state_transition: bool = True
 
 class AddAndLayerNorm(nn.Module):
     dtype: Any
@@ -81,30 +82,40 @@ class GateLoopBlock(nn.Module):
         dtype = config.dtype
 
         # linear projections
-        qkvg = nn.Dense(
-            model_dim * 4,
+        if not config.separate_state_transition:
+            qkvag = nn.Dense(
+            model_dim * 6,
             use_bias=False,
             dtype=dtype,
             kernel_init=nn.with_logical_partitioning(
-                nn.initializers.xavier_normal(), ("embed", "projection_dim")
+                nn.initializers.xavier_normal(), ("embed", "qkvag_dim")
             ),
-        )(x)
-        a = nn.Dense(
-            model_dim * 2,
-            use_bias=False,
-            dtype=dtype,
-            kernel_init=nn.with_logical_partitioning(
-                nn.initializers.xavier_normal(), ("embed", "a_dim")
-            ),
-            name="state_transition",
-        )(x)
-        
-        q, k, v, g = qkvg.reshape(
-            (*x.shape[:2], model_dim, 4)
-        ).transpose((3, 0, 1, 2))
-        a_real, a_imag = a.reshape(
-            (*x.shape[:2], model_dim, 2)
-        ).transpose((3, 0, 1, 2))
+            )(x)
+
+            q, k, v, a_real, a_imag, g = qkvag.reshape(
+                (*x.shape[:2], model_dim, 6)
+            ).transpose((3, 0, 1, 2))
+        else:
+            qkvg = nn.Dense(
+                model_dim * 4,
+                use_bias=False,
+                dtype=dtype,
+                kernel_init=nn.with_logical_partitioning(
+                    nn.initializers.xavier_normal(), ("embed", "qkvg_dim")
+                ),
+            )(x)
+            a = nn.Dense(
+                model_dim * 2,
+                use_bias=False,
+                dtype=dtype,
+                kernel_init=nn.with_logical_partitioning(
+                    nn.initializers.xavier_normal(), ("embed", "a_dim")
+                ),
+                name="state_transition",
+            )(x)
+            
+            q, k, v, g = qkvg.reshape((*x.shape[:2], model_dim, 4)).transpose((3, 0, 1, 2))
+            a_real, a_imag = a.reshape((*x.shape[:2], model_dim, 2)).transpose((3, 0, 1, 2))
 
         # state transition in polar form
         a_complex = a_real + 1j * a_imag
