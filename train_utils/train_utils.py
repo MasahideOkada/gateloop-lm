@@ -9,10 +9,10 @@ Params = FrozenDict[str, Any]
 Tx = optax.GradientTransformationExtraArgs
 
 def get_scheduler(
-        schedule_type: str,
-        lr: float,
-        warmup_steps: Optional[int],
-        decay_steps: Optional[int],
+    schedule_type: str,
+    lr: float,
+    warmup_steps: Optional[int],
+    decay_steps: Optional[int],
 ) -> Scheduler:
     if schedule_type == "cosine_decay" and not isinstance(decay_steps, int):
         raise ValueError("`decay_steps` must be specified when `schedule_type` is `cosine_decay`")
